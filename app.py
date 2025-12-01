@@ -332,7 +332,7 @@ data = None
 if input_mode == "Type numbers":
     text = st.sidebar.text_area(
         "Enter numbers (commas, spaces, or newlines):",
-        "5, 6, 7, 8, 5, 4, 9, 3"
+        "Enter Here!"
     )
     data = parse_manual_data(text)
 else:
@@ -562,3 +562,4 @@ with tabs[2]:
         - In **Manual tuning**, you can experiment with the parameters yourself and see how the curve moves.
         """
     )
+
