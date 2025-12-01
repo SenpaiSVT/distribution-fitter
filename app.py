@@ -34,7 +34,7 @@ THEMES = {
         "text_color": "#f5f5f5",
         "ax_facecolor": "#111827",
         "hist_edgecolor": "#111827",
-        "hist_alpha": 0.7,
+        "hist_alpha": 0.8,      # a bit stronger
         "hist_color": "#14b8a6",
         "line_color_main": "#fb923c",
         "line_color_shadow": "#ea580c",
@@ -48,8 +48,8 @@ THEMES = {
         "text_color": "#f5f5f5",
         "ax_facecolor": "#020617",
         "hist_edgecolor": "none",
-        "hist_alpha": 0.9,
-        "hist_color": None,  # not used; we use cmap instead
+        "hist_alpha": 1.0,      # solid bars, easier to see
+        "hist_color": None,     # not used; we use cmap instead
         "line_color_main": "#facc15",
         "line_color_shadow": "#a16207",
         "grid": False,
@@ -62,7 +62,7 @@ THEMES = {
         "text_color": "#111827",
         "ax_facecolor": "#ffffff",
         "hist_edgecolor": "#e5e7eb",
-        "hist_alpha": 0.6,
+        "hist_alpha": 0.7,
         "hist_color": "#60a5fa",
         "line_color_main": "#ec4899",
         "line_color_shadow": "#be185d",
@@ -76,7 +76,7 @@ THEMES = {
         "text_color": "#f9fafb",
         "ax_facecolor": "#020617",
         "hist_edgecolor": "#22c55e",
-        "hist_alpha": 0.35,
+        "hist_alpha": 1.0,       # full to show heights clearly
         "hist_color": "#22c55e",  # neon teal
         "line_color_main": "#ff7bff",   # bright magenta
         "line_color_shadow": "#fb37ff", # glow behind
@@ -154,7 +154,9 @@ def parse_manual_data(text: str) -> np.ndarray:
 def compute_fit_error(data: np.ndarray, dist, params):
     """Compare histogram density to PDF values and return MSE and MAE."""
     data = np.asarray(data)
-    counts, bin_edges = np.histogram(data, bins="auto", density=True)
+    # use same binning logic as our plots
+    n_bins = max(5, min(30, max(1, len(data) // 2)))
+    counts, bin_edges = np.histogram(data, bins=n_bins, density=True)
     bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
     x_grid = np.linspace(data.min(), data.max(), 400)
@@ -185,46 +187,80 @@ def split_params(params):
 
 
 def make_histogram_with_pdf(data: np.ndarray, dist, params, title: str):
-    """Return a themed matplotlib Figure with histogram + PDF curve."""
+    """
+    Return a themed matplotlib Figure with histogram + PDF curve.
+
+    - Works the same for all themes.
+    - Uses a reasonable number of bins based on data size.
+    - Keeps histogram bars transparent (alpha from THEME["hist_alpha"]).
+    """
     data = np.asarray(data)
     fig, ax = plt.subplots(figsize=(6, 4.5))
 
-    # Figure / axes background
-    ax.set_facecolor(THEME["ax_facecolor"])
-    fig.patch.set_facecolor(THEME["ax_facecolor"])
+    # Background
+    if THEME["dark"]:
+        ax.set_facecolor("#111827")          # dark but not pure black
+        fig.patch.set_facecolor("#111827")
+    else:
+        ax.set_facecolor(THEME["ax_facecolor"])
+        fig.patch.set_facecolor(THEME["ax_facecolor"])
 
-    # Histogram styling – viridis gradient or single color
+    # ----- choose number of bins -----
+    # sqrt rule with some clamping so it's never silly
+    n_bins = int(np.sqrt(len(data)) * 1.5)
+    n_bins = max(5, min(40, n_bins))
+
+    # ----- HISTOGRAM -----
+    # ---------- ALWAYS USE TRANSPARENT HISTOGRAMS ---------- #
+    transparency = 0.55  # universal alpha
+
+    # ---------- VIRIDIS GRADIENT WITH TRUE TRANSPARENCY ---------- #
     if THEME["use_viridis"]:
         counts, bins = np.histogram(data, bins="auto", density=True)
         bin_widths = np.diff(bins)
+
+        # Normalize bar heights for gradient mapping
         if len(counts) > 0 and np.max(counts) > np.min(counts):
             norm_counts = (counts - counts.min()) / (counts.max() - counts.min())
         else:
             norm_counts = np.zeros_like(counts)
+
         cmap = cm.get_cmap("viridis")
+
+        # α = super transparent so viridis actually looks transparent
+        viridis_alpha = 0.35
+
         for c, x_left, w, val in zip(counts, bins[:-1], bin_widths, norm_counts):
+            bar_color = cmap(val)
+
+            # Make the viridis color itself transparent
+            bar_color = (bar_color[0], bar_color[1], bar_color[2], viridis_alpha)
+
             ax.bar(
                 x_left + w / 2,
                 c,
                 width=w,
-                color=cmap(val),
+                color=bar_color,
                 edgecolor=THEME["hist_edgecolor"],
                 align="center",
-                alpha=THEME["hist_alpha"],
+                linewidth=0.7,
             )
+
+
+    # ALL OTHER THEMES (Light, Dark, Neon, Seaborn)
     else:
-        # standard / neon histogram
         ax.hist(
             data,
             bins="auto",
             density=True,
-            alpha=THEME["hist_alpha"],
+            alpha=transparency,   # ← ALWAYS transparent
             color=THEME["hist_color"],
             edgecolor=THEME["hist_edgecolor"],
             linewidth=1.1,
         )
 
-    # PDF curve
+
+    # ----- PDF CURVE -----
     x = np.linspace(data.min(), data.max(), 400)
     pdf = dist.pdf(x, *params)
 
@@ -250,23 +286,22 @@ def make_histogram_with_pdf(data: np.ndarray, dist, params, title: str):
             x,
             pdf,
             color=THEME["line_color_shadow"],
-            linewidth=3.6,
-            alpha=0.35,
+            linewidth=3.2,
+            alpha=0.30,
         )
         ax.plot(
             x,
             pdf,
             color=THEME["line_color_main"],
-            linewidth=2.2,
+            linewidth=2.0,
             label="Fitted PDF",
         )
 
-    # Labels + title
+    # ----- LABELS & STYLING -----
     ax.set_xlabel("Value")
     ax.set_ylabel("Density")
     ax.set_title(title)
 
-    # Force all text/spines to match theme text colour
     ax.tick_params(axis="x", colors=THEME["text_color"])
     ax.tick_params(axis="y", colors=THEME["text_color"])
     ax.xaxis.label.set_color(THEME["text_color"])
@@ -280,6 +315,7 @@ def make_histogram_with_pdf(data: np.ndarray, dist, params, title: str):
     ax.legend(frameon=False, facecolor="none", edgecolor="none")
     fig.tight_layout()
     return fig
+
 
 
 # ---------- SIDEBAR: DATA & OPTIONS ---------- #
@@ -303,15 +339,40 @@ else:
     uploaded = st.sidebar.file_uploader("Upload a CSV file", type=["csv"])
     if uploaded is not None:
         df = pd.read_csv(uploaded)
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        if numeric_cols:
-            col_name = st.sidebar.selectbox(
-                "Choose a numeric column:",
-                numeric_cols
-            )
-            data = df[col_name].dropna().values
-        else:
+
+        st.sidebar.write("CSV preview:")
+        st.sidebar.dataframe(df.head())
+
+        # Extract *all* numeric values in the entire sheet
+        numeric_df = df.select_dtypes(include=[np.number])
+
+        if numeric_df.empty:
             st.sidebar.warning("No numeric columns found in this file.")
+        else:
+            mode = st.sidebar.radio(
+                "Use data from:",
+                ("All numeric data in the sheet", "Choose a single column"),
+                index=0
+            )
+
+            if mode == "All numeric data in the sheet":
+                # Flatten everything
+                arr = numeric_df.to_numpy().ravel()
+                arr = arr[~np.isnan(arr)]
+                data = arr
+            else:
+                # Let user pick a column
+                col = st.sidebar.selectbox(
+                    "Select column:",
+                    numeric_df.columns.tolist()
+                )
+                series = numeric_df[col]
+                series = pd.to_numeric(series, errors="coerce")
+                data = series.dropna().values
+
+            st.sidebar.success(f"Loaded **{len(data)}** numeric data points.")
+
+
 
 st.sidebar.subheader("2. Distribution")
 dist_name = st.sidebar.selectbox(
@@ -356,7 +417,6 @@ with tabs[0]:
     with col_metrics:
         st.subheader("Fitted parameters")
         param_df = pd.DataFrame({"Parameter": param_labels, "Value": param_values})
-        # these class names don't have CSS now, but harmless
         st.markdown('<div class="param-table">', unsafe_allow_html=True)
         st.table(param_df)
         st.markdown("</div>", unsafe_allow_html=True)
@@ -393,6 +453,10 @@ with tabs[1]:
     )
 
     col_sliders, col_manual_plot = st.columns([1, 2])
+
+    # reuse automatic fit params from tab 1
+    raw_params = dist.fit(data)
+    shape_params, center, spread = split_params(raw_params)
 
     with col_sliders:
         st.subheader("Adjust parameters")
